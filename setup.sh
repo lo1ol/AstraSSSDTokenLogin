@@ -17,7 +17,7 @@ function install_packages ()
 	if [[ $? -ne 0 ]]
 	then
 		wget -q "https://download.rutoken.ru/Rutoken/PKCS11Lib/Current/Linux/x64/librtpkcs11ecp.so";
-        	if [[ $? -ne 0 ]]; then echoerr "Не могу скачать пакет librtpkcs11ecp.so"; fi 
+		if [[ $? -ne 0 ]]; then echoerr "Не могу скачать пакет librtpkcs11ecp.so"; fi 
 		sudo cp librtpkcs11ecp.so /usr/lib/;
 	fi
 
@@ -156,7 +156,7 @@ token_present
 PIN=`get_token_password`
 choice=`$DIALOG --title "Меню" \
 	--menu "Выберете действие:" 0 0 0 \
-	0 "Создать заявку" \
+	0 "Создать заявку на сертификат" \
 	1 "Настроить систему"`;
 
 case $choice in
