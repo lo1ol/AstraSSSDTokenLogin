@@ -61,7 +61,7 @@ function choose_key ()
 	fi
 	key_ids=`echo -e "$key_ids\n\"Новый ключ\""`;
 	key_ids=`echo "$key_ids" | awk '{printf("%s\t%s\n", NR, $0)}'`;
-	key_id=`echo $key_ids | xargs $DIALOG --title "Выбор ключа" --menu "Выберете ключ" 0 0 0`;
+	key_id=`echo $key_ids | xargs $DIALOG --title "Выбор ключа" --menu "Выберите ключ" 0 0 0`;
 	key_id=`echo "$key_ids" | sed "${key_id}q;d" | cut -f2 -d$'\t'`;
 	echo "$key_id"
 }
@@ -75,7 +75,7 @@ function import_cert ()
 		echoerr "На Рутокене нет ключей";
 	fi
 	key_ids=`echo "$key_ids" | awk '{printf("%s\t%s\n", NR, $0)}'`;
-	key_id=`echo $key_ids | xargs $DIALOG --title "Выбор ключа" --menu "Выберете ключ для которого выдан сертификат" 0 0 0`;
+	key_id=`echo $key_ids | xargs $DIALOG --title "Выбор ключа" --menu "Выберите ключ для которого выдан сертификат" 0 0 0`;
 	key_id=`echo "$key_ids" | sed "${key_id}q;d" | cut -f2 -d$'\t'`;
 	
 	openssl x509 -in $cert_path -out cert.crt -inform PEM -outform DER;
@@ -155,7 +155,7 @@ token_present
 
 PIN=`get_token_password`
 choice=`$DIALOG --title "Меню" \
-	--menu "Выберете действие:" 0 0 0 \
+	--menu "Выберите действие:" 0 0 0 \
 	0 "Создать заявку на сертификат" \
 	1 "Настроить систему"`;
 
@@ -167,7 +167,7 @@ case $choice in
 	then 
 		echo "Генерация нового ключа"
 		key_id=`gen_key`
-		$DOALOG --msgbox "Идентификатор нового ключа $key_id" 0 0
+		$DIALOG --msgbox "Идентификатор нового ключа $key_id" 0 0
 	fi
 	
 	echo "Создание запроса на сертификат"
