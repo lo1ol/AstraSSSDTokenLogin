@@ -4,17 +4,65 @@ DIALOG="dialog --keep-tite --stdout"
 NUMBER_REGEXP='^[0123456789abcdefABCDEF]+$'
 CUR_DIR=`pwd`
 
-function init() { cd $(mktemp -d); }
+function init() {
+        source /etc/os-release
+        OS_NAME=$NAME
+
+        case $OS_NAME in
+        "RED OS")
+                LIBRTPKCS11ECP=/usr/lib64/librtpkcs11ecp.so
+                PKCS11_ENGINE=/usr/lib64/engines-1.1/pkcs11.so
+                ;;
+        "Astra Linux"*)
+                LIBRTPKCS11ECP=/usr/lib/librtpkcs11ecp.so
+                PKCS11_ENGINE=/usr/lib/x86_64-linux-gnu/engines-1.1/pkcs11.so
+                ;;
+        esac
+
+        SCRIPT_DIR="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+
+        cd $(mktemp -d);
+}
 function cleanup() { rm -rf `pwd`; cd $CUR_DIR; }
 
 echoerr() { echo -e "Ошибка: $@" 1>&2; cleanup; exit; }
 
 function install_packages ()
 {
+        case $OS_NAME in
+        "RED OS") redos_install_packages;;
+        "Astra Linux"*) astra_install_packages;;
+        esac
+}
+
+function redos_install_packages ()
+{
+	sudo yum -q -y update
+	if ! [[ -f $LIBRTPKCS11ECP ]]
+	then
+		wget -q --no-check-certificate "https://download.rutoken.ru/Rutoken/PKCS11Lib/Current/Linux/x64/librtpkcs11ecp.so";
+        	if [[ $? -ne 0 ]]; then echoerr "Не могу скачать пакет librtpkcs11ecp.so"; fi 
+		sudo cp librtpkcs11ecp.so $LIBRTPKCS11ECP;
+	fi
+
+	sudo yum -q -y install opensc libsss_sudo dialog;
+	if [[ $? -ne 0 ]]; then echoerr "Не могу установить один из пакетов: opensc libsss_sudo dialog из репозитория"; fi
+	
+	sudo yum -q -y install libp11 engine_pkcs11;
+        if [[ $? -ne 0 ]]
+        then
+        	$DIALOG --msgbox "Скачайте последнюю версии пакетов libp11 engine_pkcs11 отсюда https://apps.fedoraproject.org/packages/libp11/builds/ и установите их с помощью команд sudo rpm -i /path/to/package. Или соберите сами их из исходников" 0 0
+		echoerr "Установите пакеты libp11 и engine_pkcs11 отсюда https://apps.fedoraproject.org/packages/libp11/builds/"
+	fi
+
+	sudo systemctl restart pcscd
+}
+
+function astra_install_packages ()
+{
 	sudo apt-get -qq update
 	
-	sudo apt-get -qq install librtpkcs11ecp;
-	if [[ $? -ne 0 ]]
+	if ! [[ -f $LIBRTPKCS11ECP ]]
 	then
 		wget -q --no-check-certificate "https://download.rutoken.ru/Rutoken/PKCS11Lib/Current/Linux/x64/librtpkcs11ecp.so";
 		if [[ $? -ne 0 ]]; then echoerr "Не могу скачать пакет librtpkcs11ecp.so"; fi 
@@ -34,7 +82,7 @@ function token_present ()
 
 function get_key_list ()
 {
-	key_ids=`pkcs11-tool --module /usr/lib/librtpkcs11ecp.so -O --type pubkey 2> /dev/null | grep -Eo "ID:.*" |  awk '{print $2}'`;
+	key_ids=`pkcs11-tool --module $LIBRTPKCS11ECP -O --type pubkey 2> /dev/null | grep -Eo "ID:.*" |  awk '{print $2}'`;
 	echo "$key_ids";
 }
 
@@ -79,31 +127,42 @@ function import_cert ()
 	key_id=`echo "$key_ids" | sed "${key_id}q;d" | cut -f2 -d$'\t'`;
 	
 	openssl x509 -in $cert_path -out cert.crt -inform PEM -outform DER;
-	pkcs11-tool --module /usr/lib/librtpkcs11ecp.so -l -p $PIN -y cert -w cert.crt --id $key_id 2> /dev/null > /dev/null;
+	pkcs11-tool --module $LIBRTPKCS11ECP -l -p $PIN -y cert -w cert.crt --id $key_id 2> /dev/null > /dev/null;
 	if [[ $? -ne 0 ]]; then echoerr "Не могу импортировать сертификат на токен"; fi
 }
 
 function gen_key ()
 {
 	key_id=`gen_key_id`
-	out=`pkcs11-tool --module /usr/lib/librtpkcs11ecp.so --keypairgen --key-type rsa:2048 -l -p $PIN --id $key_id 2>&1`;
+	out=`pkcs11-tool --module $LIBRTPKCS11ECP --keypairgen --key-type rsa:2048 -l -p $PIN --id $key_id 2>&1`;
 	echo $key_id
 }
 
 function create_cert_req ()
 {
-	key_id=$1	
-	C="RU";
-	ST=`$DIALOG --title "Данные сертификата" --inputbox "Регион:" 0 0 "Москва"`;
-	L=`$DIALOG --title "Данные сертификата" --inputbox "Населенный пункт:" 0 0 ""`;
-	O=`$DIALOG --title "Данные сертификата" --inputbox "Организация:" 0 0 "ООО Ромашка"`;
-	OU=`$DIALOG --title "Данные сертификата" --inputbox "Подразделение:" 0 0 ""`;
+	key_id=$1
+	C="/C=RU";
+        ST=`$DIALOG --title 'Данные сертификата' --inputbox 'Регион:' 0 0 'Москва'`;
+        if [[ -n "$ST" ]]; then ST="/ST=$ST"; else ST=""; fi
+
+        L=`$DIALOG --title 'Данные сертификата' --inputbox 'Населенный пункт:' 0 0 ''`;
+        if [[ -n "$L" ]]; then L="/L=$L"; else L=""; fi
+
+        O=`$DIALOG --title 'Данные сертификата' --inputbox 'Организация:' 0 0 ''`;
+        if [[ -n "$O" ]]; then O="/O=$O"; else O=""; fi
+
+        OU=`$DIALOG --title 'Данные сертификата' --inputbox 'Подразделение:' 0 0 ''`;
+        if [[ -n "$OU" ]]; then OU="/OU=$OU"; else OU=""; fi
+
 	CN=`$DIALOG --title "Данные сертификата" --inputbox "Общее имя (должно совпадать с именем пользователя, для которого создается генерируется сертификат):" 0 0 ""`;
-	email=`$DIALOG --title "Данные сертификата" --inputbox "Электронная почта:" 0 0 ""`;
+        if [[ -n "$CN" ]]; then CN="/CN=$CN"; else CN=""; fi
+
+        email=`$DIALOG --stdout --title 'Данные сертификата' --inputbox 'Электронная почта:' 0 0 ''`;
+        if [[ -n "$email" ]]; then email="/emailAddress=$email"; else email=""; fi
 	
 	req_path=`$DIALOG --title "Куда сохранить заявку" --fselect $CUR_DIR/cert.csr 0 0`	
 	
-	openssl_req="engine dynamic -pre SO_PATH:/usr/lib/x86_64-linux-gnu/engines-1.1/pkcs11.so -pre ID:pkcs11 -pre LIST_ADD:1  -pre LOAD -pre MODULE_PATH:/usr/lib/librtpkcs11ecp.so \n req -engine pkcs11 -new -key 0:$key_id -keyform engine -out \"$req_path\" -outform PEM -subj \"/C=$C/ST=$ST/L=$L/O=$O/OU=$OU/CN=$CN/emailAddress=$email\""
+	openssl_req="engine dynamic -pre SO_PATH:$PKCS11_ENGINE -pre ID:pkcs11 -pre LIST_ADD:1  -pre LOAD -pre MODULE_PATH:$LIBRTPKCS11ECP \n req -engine pkcs11 -new -key 0:$key_id -keyform engine -out \"$req_path\" -outform PEM -subj \"$C$ST$L$O$OU$CN$email\""
 
 	printf "$openssl_req" | openssl > /dev/null;
 	
@@ -133,10 +192,18 @@ function setup_authentication ()
 	if ! [ "$(sudo cat $sssd_conf | grep 'pam_cert_auth=True')" ]
 	then
 		sudo sed -i '/^\[pam\]/a pam_cert_auth=True' $sssd_conf
+		if [[ "$OS_NAME" == "RED OS" ]]
+		then
+			sudo sed -i '/^\[pam\]/a pam_p11_allowed_services = +cinnamon-screensaver' $sssd_conf
+	
+		fi
 	fi
 	sudo systemctl restart sssd
 
-	sudo sed -i -e "s/^auth.*success=2.*pam_unix.*$/auth    \[success=2 default=ignore\]    pam_sss.so forward_pass/g" -e "s/^auth.*success=1.*pam_sss.*$/auth    \[success=1 default=ignore\]    pam_unix.so nullok_secure try_first_pass/g" /etc/pam.d/common-auth
+	if [[ $OS_NAME == "Astra Linux"* ]]
+	then
+		sudo sed -i -e "s/^auth.*success=2.*pam_unix.*$/auth    \[success=2 default=ignore\]    pam_sss.so forward_pass/g" -e "s/^auth.*success=1.*pam_sss.*$/auth    \[success=1 default=ignore\]    pam_unix.so nullok_secure try_first_pass/g" /etc/pam.d/common-auth
+fi
 }
 
 function get_token_password ()
